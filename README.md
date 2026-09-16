@@ -182,12 +182,12 @@ Progress and state transitions are owned by the backend service, not the UI.
 
 ## Decisions
 
-- Minimal static UI served by Express.
-- Node.js + TypeScript + Express backend.
-- In-memory scan storage using a `Map`.
-- Backend-owned scan state and progress.
-- UI polling instead of WebSockets or SSE.
-- Deterministic mock scenarios based on exact canonical repository name.
+- Minimal static UI served by Express: the assignment needs a product experience, but not a frontend framework. A static page keeps setup small, makes the flow easy to review, and avoids adding build tooling unrelated to the backend exercise.
+- Node.js + TypeScript + Express backend: this matches the assignment requirement and keeps the API implementation explicit and easy to inspect.
+- In-memory scan storage using a `Map`: scans are looked up by ID, so `Map<string, Scan>` is the simplest fit. It avoids database setup for a three-hour mocked flow while making the restart limitation obvious.
+- Backend-owned scan state and progress: the UI does not invent progress. It renders the state returned by the API, which keeps scan lifecycle rules in one place.
+- UI polling instead of WebSockets or SSE: polling is enough for simulated progress, works with plain HTTP, and is easier to reason about for refresh/resume behavior. WebSockets or SSE would add complexity without improving this mocked assignment flow.
+- Deterministic mock scenarios based on exact canonical repository name: this makes demos and tests repeatable and avoids surprising behavior from substrings in owners, query strings, or unrelated repository names.
 - Results are product-oriented: severity, location/evidence, why it matters, and concrete next action.
 - No hidden randomness, no real scanner output, and explicit simulated-scan labeling.
 
