@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Scan Review</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">AI Scan Review</p>
+        <h1 id="page-title">Review a GitHub repository security scan</h1>
+        <p class="disclosure">
+          Simulated scan: repository contents are not inspected. Findings are
+          sample results based on deterministic demo scenarios.
+        </p>
+      </section>
+
+      <section class="panel" aria-labelledby="start-title">
+        <h2 id="start-title">Start a scan</h2>
+        <form id="scan-form" novalidate>
+          <label for="repo-url">GitHub repository URL</label>
+          <div class="form-row">
+            <input
+              id="repo-url"
+              name="repoUrl"
+              type="url"
+              inputmode="url"
+              placeholder="https://github.com/acme/api-service"
+              autocomplete="url"
+              required
+            >
+            <button id="start-button" type="submit">Start scan</button>
+          </div>
+          <p class="hint">
+            Try <code>clean</code> for no findings or <code>fail</code> for a
+            failed scan scenario.
+          </p>
+          <p id="form-error" class="message error" role="alert" hidden></p>
+        </form>
+      </section>
+
+      <section id="scan-panel" class="panel" aria-live="polite" hidden>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Simulated progress</p>
+            <h2 id="scan-heading">Scan status</h2>
+          </div>
+          <span id="scan-state" class="state-badge">Queued</span>
+        </div>
+
+        <div class="progress-wrap">
+          <div class="progress-label">
+            <span id="current-step">Waiting for scan updates.</span>
+            <span id="progress-percent">0%</span>
+          </div>
+          <progress id="progress-bar" value="0" max="100"></progress>
+        </div>
+
+        <p id="network-message" class="message warning" hidden></p>
+        <p id="scan-error" class="message error" role="alert" hidden></p>
+      </section>
+
+      <section id="results-panel" class="panel" hidden>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Prioritized results</p>
+            <h2 id="result-heading">What to address first</h2>
+          </div>
+          <span id="risk-level" class="risk-badge">None</span>
+        </div>
+
+        <p id="result-summary"></p>
+        <p id="address-first" class="address-first"></p>
+
+        <div id="empty-results" class="empty-state" hidden>
+          No sample findings were produced for this deterministic clean
+          scenario.
+        </div>
+
+        <ol id="findings-list" class="findings"></ol>
+      </section>
+    </main>
+  </body>
+</html>
