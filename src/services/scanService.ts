@@ -134,11 +134,6 @@ export class ScanService {
     return scan ? cloneScan(scan) : undefined;
   }
 
-  getResult(id: string): ScanResult | undefined {
-    const scan = this.scans.get(id);
-    return scan?.result ? cloneResult(scan.result) : undefined;
-  }
-
   private advanceScan(id: string, stepIndex: number): void {
     const delay = stepIndex === 0 ? this.stepDelayMs : this.stepDelayMs;
 
