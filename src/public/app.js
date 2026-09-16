@@ -1,5 +1,6 @@
 (function () {
   const POLL_INTERVAL_MS = 1500;
+  const REQUEST_TIMEOUT_MS = 8000;
 
   const form = document.querySelector("#scan-form");
   const repoInput = document.querySelector("#repo-url");
@@ -9,6 +10,7 @@
   const scanPanel = document.querySelector("#scan-panel");
   const scanHeading = document.querySelector("#scan-heading");
   const scanState = document.querySelector("#scan-state");
+  const progressWrap = document.querySelector("#progress-wrap");
   const currentStep = document.querySelector("#current-step");
   const progressPercent = document.querySelector("#progress-percent");
   const progressBar = document.querySelector("#progress-bar");
@@ -56,7 +58,7 @@
     startButton.textContent = "Starting...";
 
     try {
-      const response = await fetch("/api/scans", {
+      const response = await fetchWithTimeout("/api/scans", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ repoUrl })
@@ -75,7 +77,19 @@
       updateScanIdInUrl(currentScanId);
       renderScan(body, generation);
       startPolling(currentScanId, generation);
-    } catch {
+    } catch (error) {
+      if (isTimeoutError(error)) {
+        showMessage(
+          formError,
+          "Starting the scan timed out. Try again; no new scan is being tracked on this page."
+        );
+        return;
+      }
+
+      if (isAbortError(error)) {
+        return;
+      }
+
       showMessage(
         formError,
         "Could not reach the scan service. Check the server and try again."
@@ -153,9 +167,11 @@
     pollInFlightGeneration = generation;
 
     try {
-      const response = await fetch(`/api/scans/${encodeURIComponent(scanId)}`, {
-        signal: controller.signal
-      });
+      const response = await fetchWithTimeout(
+        `/api/scans/${encodeURIComponent(scanId)}`,
+        {},
+        controller
+      );
       const body = await response.json().catch(() => ({}));
 
       if (!isCurrentTracking(generation)) {
@@ -164,12 +180,7 @@
 
       if (response.status === 404) {
         stopPolling(generation);
-        show(scanPanel);
-        hide(resultsPanel);
-        showMessage(
-          scanError,
-          "Scan not found. Start a new scan or check the scan ID in the URL."
-        );
+        renderUnavailableScan(generation);
         clearScanIdInUrl(generation);
         return;
       }
@@ -189,7 +200,19 @@
         stopPolling(generation);
       }
     } catch (error) {
-      if (isAbortError(error) || !isCurrentTracking(generation)) {
+      if (!isCurrentTracking(generation)) {
+        return;
+      }
+
+      if (isTimeoutError(error)) {
+        showMessage(
+          networkMessage,
+          "Refreshing scan status timed out. The scan is still running; polling will retry."
+        );
+        return;
+      }
+
+      if (isAbortError(error)) {
         return;
       }
 
@@ -214,6 +237,7 @@
     }
 
     show(scanPanel);
+    show(progressWrap);
     scanHeading.textContent = `Scan for ${scan.repoUrl}`;
     scanState.textContent = formatState(scan.state);
     scanState.className = `state-badge state-${scan.state}`;
@@ -235,6 +259,27 @@
     if (scan.state === "completed" && scan.result) {
       renderResults(scan.result, generation);
     }
+  }
+
+  function renderUnavailableScan(generation) {
+    if (!isCurrentTracking(generation)) {
+      return;
+    }
+
+    show(scanPanel);
+    hide(progressWrap);
+    hide(resultsPanel);
+    hide(networkMessage);
+    scanHeading.textContent = "Scan unavailable";
+    scanState.textContent = "Unavailable";
+    scanState.className = "state-badge state-failed";
+    currentStep.textContent = "";
+    progressBar.value = 0;
+    progressPercent.textContent = "";
+    showMessage(
+      scanError,
+      "Scan not found. It may have expired or the backend may have restarted. Start a new scan to continue."
+    );
   }
 
   function renderResults(result, generation) {
@@ -325,6 +370,35 @@
 
   function isAbortError(error) {
     return error instanceof Error && error.name === "AbortError";
+  }
+
+  function isTimeoutError(error) {
+    return error instanceof Error && error.name === "TimeoutError";
+  }
+
+  async function fetchWithTimeout(url, options, controller = new AbortController()) {
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
+
+    try {
+      return await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (timedOut && isAbortError(error)) {
+        const timeoutError = new Error("Request timed out");
+        timeoutError.name = "TimeoutError";
+        throw timeoutError;
+      }
+
+      throw error;
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
   }
 
   function formatState(state) {

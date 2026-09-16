@@ -58,6 +58,10 @@ describe("scan API", () => {
       "https://github.com/acme/repo?tab=readme",
       "Enter the repository root URL, for example https://github.com/owner/repo."
     );
+    await assertValidationError(
+      "https://github.com/acme//clean-demo",
+      "Enter the repository root URL, for example https://github.com/owner/repo."
+    );
   });
 
   it("returns 202 when starting a valid scan", async () => {
@@ -68,6 +72,15 @@ describe("scan API", () => {
     assert.equal(body.repoUrl, "https://github.com/acme/api-service");
     assert.equal(body.state, "queued");
     assert.equal(body.progress, 0);
+  });
+
+  it("normalizes accepted repository URLs before creating a scan", async () => {
+    const response = await postScan("  https://github.com/acme/clean-demo.git/  ");
+    const body = (await response.json()) as Scan;
+
+    assert.equal(response.status, 202);
+    assert.equal(body.repoUrl, "https://github.com/acme/clean-demo");
+    assert.equal(body.scenario, "clean");
   });
 
   it("returns 404 for an unknown scan ID", async () => {
@@ -102,9 +115,10 @@ describe("scan API", () => {
   });
 
   it("reaches failed for the failure scenario", async () => {
-    const scan = await createScan("https://github.com/acme/fail-demo");
+    const scan = await createScan("https://github.com/acme/fail-demo.git");
     const failed = await waitForTerminalScan(scan.id);
 
+    assert.equal(failed.repoUrl, "https://github.com/acme/fail-demo");
     assert.equal(failed.state, "failed");
     assert.equal(failed.progress, 100);
     assert.match(failed.error ?? "", /repository name is "fail-demo"/);

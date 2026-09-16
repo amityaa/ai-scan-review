@@ -97,7 +97,19 @@ export function validateRepoUrl(value: unknown): RepoUrlValidation {
     return { valid: false, error: "repoUrl must not include a port." };
   }
 
-  const pathParts = parsed.pathname.split("/").filter(Boolean);
+  if (parsed.search || parsed.hash) {
+    return {
+      valid: false,
+      error: "Enter the repository root URL, for example https://github.com/owner/repo."
+    };
+  }
+
+  const pathValidation = normalizeRepositoryPath(parsed.pathname);
+  if (!pathValidation.valid) {
+    return pathValidation;
+  }
+
+  const pathParts = pathValidation.pathParts;
   if (pathParts.length < 2) {
     return {
       valid: false,
@@ -105,12 +117,51 @@ export function validateRepoUrl(value: unknown): RepoUrlValidation {
     };
   }
 
-  if (pathParts.length !== 2 || parsed.search || parsed.hash) {
+  if (pathParts.length !== 2) {
     return {
       valid: false,
       error: "Enter the repository root URL, for example https://github.com/owner/repo."
     };
   }
 
-  return { valid: true, repoUrl: parsed.toString() };
+  const [owner, repository] = pathParts;
+  return {
+    valid: true,
+    repoUrl: `https://github.com/${owner}/${repository}`
+  };
+}
+
+type RepositoryPathValidation =
+  | {
+      valid: true;
+      pathParts: string[];
+    }
+  | {
+      valid: false;
+      error: string;
+    };
+
+function normalizeRepositoryPath(pathname: string): RepositoryPathValidation {
+  const pathParts = pathname.split("/");
+
+  if (pathParts.at(-1) === "") {
+    pathParts.pop();
+  }
+
+  if (pathParts[0] === "") {
+    pathParts.shift();
+  }
+
+  if (pathParts.some((part) => part.length === 0)) {
+    return {
+      valid: false,
+      error: "Enter the repository root URL, for example https://github.com/owner/repo."
+    };
+  }
+
+  if (pathParts[1]?.toLowerCase().endsWith(".git")) {
+    pathParts[1] = pathParts[1].slice(0, -4);
+  }
+
+  return { valid: true, pathParts };
 }
