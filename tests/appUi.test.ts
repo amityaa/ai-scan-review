@@ -175,6 +175,66 @@ describe("static UI scan tracking", () => {
     assert.match(harness.text("form-error"), /timed out/i);
   });
 
+  it("keeps the creation timeout active while reading the response body", async () => {
+    const harness = createUiHarness();
+
+    harness.submit("https://github.com/acme/stalled-body");
+    const post = harness.nextPost();
+    post.resolve(pendingJsonResponse(202));
+    await flushPromises();
+
+    assert.equal(harness.el("start-button").disabled, true);
+
+    harness.tickTimeouts();
+    await flushPromises();
+
+    assert.equal(harness.el("start-button").disabled, false);
+    assert.match(harness.text("form-error"), /timed out/i);
+    assert.equal(harness.el("scan-panel").hidden, true);
+    assert.doesNotMatch(harness.href(), /scanId=/);
+  });
+
+  it("reports malformed successful creation responses without replacing the existing scan", async () => {
+    const harness = createUiHarness();
+    const poll = await startScanAndOpenPoll(harness, "scan-a", "https://github.com/acme/old");
+    poll.resolve(jsonResponse(200, completedScan("scan-a", "https://github.com/acme/old")));
+    await flushPromises();
+
+    harness.submit("https://github.com/acme/new");
+    harness.nextPost().resolve(invalidJsonResponse(202));
+    await flushPromises();
+
+    assert.match(harness.text("form-error"), /invalid response/i);
+    assert.equal(harness.text("scan-heading"), "Scan for https://github.com/acme/old");
+    assert.equal(harness.el("results-panel").hidden, false);
+    assert.match(harness.href(), /scanId=scan-a/);
+  });
+
+  it("rejects successful creation responses missing scan fields", async () => {
+    const harness = createUiHarness();
+
+    harness.submit("https://github.com/acme/missing-id");
+    harness.nextPost().resolve(jsonResponse(202, { repoUrl: "https://github.com/acme/missing-id" }));
+    await flushPromises();
+
+    assert.match(harness.text("form-error"), /invalid response/i);
+    assert.equal(harness.el("scan-panel").hidden, true);
+    assert.doesNotMatch(harness.href(), /scanId=/);
+  });
+
+  it("reports malformed successful polling responses without replacing the current scan", async () => {
+    const harness = createUiHarness();
+    const poll = await startScanAndOpenPoll(harness, "scan-a", "https://github.com/acme/current");
+
+    poll.resolve(invalidJsonResponse(200));
+    await flushPromises();
+
+    assert.match(harness.text("network-message"), /invalid response/i);
+    assert.equal(harness.text("scan-heading"), "Scan for https://github.com/acme/current");
+    assert.equal(harness.el("scan-error").hidden, true);
+    assert.match(harness.href(), /scanId=scan-a/);
+  });
+
   it("renders an explicit unavailable state for the current scan 404", async () => {
     const harness = createUiHarness("http://localhost/?scanId=missing-scan");
     const poll = harness.nextRequest("/api/scans/missing-scan");
@@ -191,6 +251,83 @@ describe("static UI scan tracking", () => {
     assert.match(harness.text("scan-error"), /backend may have restarted/i);
     assert.doesNotMatch(harness.href(), /scanId=/);
     assert.equal(harness.intervalCount(), 0);
+  });
+
+  it("clears the scan URL and all displayed scan state", async () => {
+    const harness = createUiHarness();
+    const poll = await startScanAndOpenPoll(harness, "scan-a", "https://github.com/acme/old");
+
+    poll.resolve(jsonResponse(200, completedScan("scan-a", "https://github.com/acme/old")));
+    await flushPromises();
+    assert.equal(harness.el("results-panel").hidden, false);
+    assert.match(harness.href(), /scanId=scan-a/);
+
+    harness.clear();
+
+    assert.equal(harness.el("scan-panel").hidden, true);
+    assert.equal(harness.el("results-panel").hidden, true);
+    assert.equal(harness.el("form-error").hidden, true);
+    assert.equal(harness.el("network-message").hidden, true);
+    assert.equal(harness.el("scan-error").hidden, true);
+    assert.equal(harness.text("scan-heading"), "Scan status");
+    assert.equal(harness.text("current-step"), "Waiting for scan updates.");
+    assert.equal(harness.text("progress-percent"), "0%");
+    assert.doesNotMatch(harness.href(), /scanId=/);
+    assert.equal(harness.intervalCount(), 0);
+  });
+
+  it("prevents a pending scan creation response from restoring after Clear", async () => {
+    const harness = createUiHarness();
+
+    harness.submit("https://github.com/acme/pending");
+    const pendingPost = harness.getRequests("/api/scans")[0];
+    assert.ok(pendingPost);
+    assert.equal(harness.el("start-button").disabled, true);
+
+    harness.clear();
+    assert.equal(harness.el("start-button").disabled, false);
+    assert.equal(harness.el("scan-panel").hidden, true);
+
+    pendingPost.resolve(
+      jsonResponse(202, queuedScan("scan-a", "https://github.com/acme/pending"))
+    );
+    await flushPromises();
+
+    assert.equal(harness.el("scan-panel").hidden, true);
+    assert.doesNotMatch(harness.href(), /scanId=/);
+    assert.equal(harness.intervalCount(), 0);
+  });
+
+  it("does not let stale creation cleanup release a newer pending creation", async () => {
+    const harness = createUiHarness();
+
+    harness.submit("https://github.com/acme/old-pending");
+    const oldPost = harness.getRequests("/api/scans")[0];
+    assert.ok(oldPost);
+    harness.clear();
+
+    harness.submit("https://github.com/acme/new-pending");
+    const newPost = harness.getRequests("/api/scans")[1];
+    assert.ok(newPost);
+    assert.equal(harness.el("start-button").disabled, true);
+
+    oldPost.resolve(
+      jsonResponse(202, queuedScan("scan-a", "https://github.com/acme/old-pending"))
+    );
+    await flushPromises();
+
+    assert.equal(harness.el("start-button").disabled, true);
+    assert.equal(harness.el("scan-panel").hidden, true);
+    assert.doesNotMatch(harness.href(), /scanId=scan-a/);
+
+    newPost.resolve(
+      jsonResponse(202, queuedScan("scan-b", "https://github.com/acme/new-pending"))
+    );
+    await flushPromises();
+
+    assert.equal(harness.el("start-button").disabled, false);
+    assert.equal(harness.text("scan-heading"), "Scan for https://github.com/acme/new-pending");
+    assert.match(harness.href(), /scanId=scan-b/);
   });
 });
 
@@ -255,6 +392,24 @@ function jsonResponse(status: number, body: JsonBody): MockResponse {
     ok: status >= 200 && status < 300,
     status,
     json: async () => body
+  };
+}
+
+function invalidJsonResponse(status: number): MockResponse {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => {
+      throw new SyntaxError("Invalid JSON");
+    }
+  };
+}
+
+function pendingJsonResponse(status: number): MockResponse {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => new Promise<JsonBody>(() => undefined)
   };
 }
 
@@ -342,7 +497,7 @@ function createUiHarness(initialHref = "http://localhost/") {
         init,
         resolve: (value) => {
           cleanup();
-          resolve(value);
+          resolve(wrapResponseForAbort(value, init?.signal));
         },
         reject: (reason) => {
           cleanup();
@@ -376,6 +531,9 @@ function createUiHarness(initialHref = "http://localhost/") {
       requiredElement(elements, "repo-url").value = repoUrl;
       requiredElement(elements, "scan-form").dispatch("submit");
     },
+    clear: () => {
+      requiredElement(elements, "clear-button").dispatch("click");
+    },
     tickIntervals: () => {
       for (const callback of Array.from(intervals.values())) {
         callback();
@@ -408,11 +566,45 @@ function createUiHarness(initialHref = "http://localhost/") {
   };
 }
 
+function wrapResponseForAbort(
+  response: MockResponse,
+  signal?: AbortSignal
+): MockResponse {
+  return {
+    ok: response.ok,
+    status: response.status,
+    json: () =>
+      new Promise<JsonBody>((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(abortError());
+          return;
+        }
+
+        const abortListener = () => {
+          reject(abortError());
+        };
+        signal?.addEventListener("abort", abortListener, { once: true });
+
+        response.json().then(
+          (body) => {
+            signal?.removeEventListener("abort", abortListener);
+            resolve(body);
+          },
+          (error) => {
+            signal?.removeEventListener("abort", abortListener);
+            reject(error);
+          }
+        );
+      })
+  };
+}
+
 function createElements(): Map<string, TestElement> {
   const ids = [
     "scan-form",
     "repo-url",
     "start-button",
+    "clear-button",
     "form-error",
     "scan-panel",
     "scan-heading",

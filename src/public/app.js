@@ -5,6 +5,7 @@
   const form = document.querySelector("#scan-form");
   const repoInput = document.querySelector("#repo-url");
   const startButton = document.querySelector("#start-button");
+  const clearButton = document.querySelector("#clear-button");
   const exampleButtons = document.querySelectorAll("[data-example-url]");
   const formError = document.querySelector("#form-error");
   const scanPanel = document.querySelector("#scan-panel");
@@ -26,6 +27,8 @@
   let currentScanId = null;
   let pollTimer = null;
   let trackingGeneration = 0;
+  let startRequestGeneration = 0;
+  let activeStartController = null;
   let activePollController = null;
   let pollInFlightGeneration = null;
   let startInFlight = false;
@@ -37,6 +40,10 @@
       repoInput.focus();
     });
   }
+
+  clearButton.addEventListener("click", () => {
+    clearScan();
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -56,18 +63,30 @@
     startInFlight = true;
     startButton.disabled = true;
     startButton.textContent = "Starting...";
+    const startGeneration = beginStartRequest();
 
     try {
-      const response = await fetchWithTimeout("/api/scans", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ repoUrl })
-      });
-      const body = await response.json().catch(() => ({}));
+      const { response, body } = await requestJsonWithTimeout(
+        "/api/scans",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ repoUrl })
+        },
+        activeStartController
+      );
+
+      if (!isCurrentStartRequest(startGeneration)) {
+        return;
+      }
 
       if (!response.ok) {
-        showMessage(formError, body.error || "Unable to start the scan.");
+        showMessage(formError, getErrorMessage(body, "Unable to start the scan."));
         return;
+      }
+
+      if (!isScanResponse(body)) {
+        throw invalidResponseError();
       }
 
       const generation = beginTracking(body.id);
@@ -78,6 +97,10 @@
       renderScan(body, generation);
       startPolling(currentScanId, generation);
     } catch (error) {
+      if (!isCurrentStartRequest(startGeneration)) {
+        return;
+      }
+
       if (isTimeoutError(error)) {
         showMessage(
           formError,
@@ -90,14 +113,22 @@
         return;
       }
 
+      if (isInvalidResponseError(error)) {
+        showMessage(
+          formError,
+          "The scan service returned an invalid response. No new scan is being tracked."
+        );
+        return;
+      }
+
       showMessage(
         formError,
         "Could not reach the scan service. Check the server and try again."
       );
     } finally {
-      startInFlight = false;
-      startButton.disabled = false;
-      startButton.textContent = "Start scan";
+      if (isCurrentStartRequest(startGeneration)) {
+        finishStartRequest();
+      }
     }
   });
 
@@ -116,6 +147,59 @@
     trackingGeneration += 1;
     currentScanId = scanId;
     return trackingGeneration;
+  }
+
+  function beginStartRequest() {
+    startRequestGeneration += 1;
+    activeStartController = new AbortController();
+    return startRequestGeneration;
+  }
+
+  function finishStartRequest() {
+    startInFlight = false;
+    activeStartController = null;
+    startButton.disabled = false;
+    startButton.textContent = "Start scan";
+  }
+
+  function clearScan() {
+    invalidateStartRequest();
+    stopCurrentTracking();
+    trackingGeneration += 1;
+    currentScanId = null;
+    hide(formError);
+    hide(scanPanel);
+    hide(progressWrap);
+    hide(networkMessage);
+    hide(scanError);
+    hide(resultsPanel);
+    hide(emptyResults);
+    show(findingsList);
+    findingsList.replaceChildren();
+    scanHeading.textContent = "Scan status";
+    scanState.textContent = "Queued";
+    scanState.className = "state-badge";
+    currentStep.textContent = "Waiting for scan updates.";
+    progressBar.value = 0;
+    progressPercent.textContent = "0%";
+    resultSummary.textContent = "";
+    addressFirst.textContent = "";
+    riskLevel.textContent = "None";
+    riskLevel.className = "risk-badge";
+    removeScanIdFromUrl();
+  }
+
+  function invalidateStartRequest() {
+    startRequestGeneration += 1;
+
+    if (activeStartController) {
+      activeStartController.abort();
+      activeStartController = null;
+    }
+
+    startInFlight = false;
+    startButton.disabled = false;
+    startButton.textContent = "Start scan";
   }
 
   function startPolling(scanId, generation) {
@@ -167,12 +251,11 @@
     pollInFlightGeneration = generation;
 
     try {
-      const response = await fetchWithTimeout(
+      const { response, body } = await requestJsonWithTimeout(
         `/api/scans/${encodeURIComponent(scanId)}`,
         {},
         controller
       );
-      const body = await response.json().catch(() => ({}));
 
       if (!isCurrentTracking(generation)) {
         return;
@@ -191,6 +274,10 @@
           "Temporary issue refreshing scan status. The scan has not been marked as failed."
         );
         return;
+      }
+
+      if (!isScanResponse(body)) {
+        throw invalidResponseError();
       }
 
       hide(networkMessage);
@@ -213,6 +300,14 @@
       }
 
       if (isAbortError(error)) {
+        return;
+      }
+
+      if (isInvalidResponseError(error)) {
+        showMessage(
+          networkMessage,
+          "The scan service returned an invalid response. The scan has not been marked as failed."
+        );
         return;
       }
 
@@ -359,6 +454,10 @@
     }
 
     currentScanId = null;
+    removeScanIdFromUrl();
+  }
+
+  function removeScanIdFromUrl() {
     const url = new URL(window.location.href);
     url.searchParams.delete("scanId");
     window.history.replaceState({}, "", url.pathname + url.search);
@@ -366,6 +465,10 @@
 
   function isCurrentTracking(generation) {
     return generation === trackingGeneration;
+  }
+
+  function isCurrentStartRequest(generation) {
+    return generation === startRequestGeneration;
   }
 
   function isAbortError(error) {
@@ -376,7 +479,15 @@
     return error instanceof Error && error.name === "TimeoutError";
   }
 
-  async function fetchWithTimeout(url, options, controller = new AbortController()) {
+  function isInvalidResponseError(error) {
+    return error instanceof Error && error.name === "InvalidResponseError";
+  }
+
+  async function requestJsonWithTimeout(
+    url,
+    options,
+    controller = new AbortController()
+  ) {
     let timedOut = false;
     const timeoutId = window.setTimeout(() => {
       timedOut = true;
@@ -384,10 +495,12 @@
     }, REQUEST_TIMEOUT_MS);
 
     try {
-      return await fetch(url, {
+      const response = await fetch(url, {
         ...options,
         signal: controller.signal
       });
+      const body = await readJsonBody(response);
+      return { response, body };
     } catch (error) {
       if (timedOut && isAbortError(error)) {
         const timeoutError = new Error("Request timed out");
@@ -399,6 +512,42 @@
     } finally {
       window.clearTimeout(timeoutId);
     }
+  }
+
+  async function readJsonBody(response) {
+    try {
+      return await response.json();
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+
+      if (response.ok) {
+        throw invalidResponseError();
+      }
+
+      return {};
+    }
+  }
+
+  function invalidResponseError() {
+    const error = new Error("Invalid response");
+    error.name = "InvalidResponseError";
+    return error;
+  }
+
+  function isScanResponse(body) {
+    return (
+      body &&
+      typeof body.id === "string" &&
+      typeof body.repoUrl === "string" &&
+      typeof body.state === "string" &&
+      typeof body.progress === "number"
+    );
+  }
+
+  function getErrorMessage(body, fallback) {
+    return body && typeof body.error === "string" ? body.error : fallback;
   }
 
   function formatState(state) {
