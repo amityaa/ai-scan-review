@@ -35,9 +35,6 @@
     }
 
     hide(formError);
-    hide(networkMessage);
-    hide(scanError);
-    hide(resultsPanel);
 
     const repoUrl = repoInput.value.trim();
     if (!repoUrl) {
@@ -63,6 +60,9 @@
       }
 
       const generation = beginTracking(body.id);
+      hide(networkMessage);
+      hide(scanError);
+      hide(resultsPanel);
       updateScanIdInUrl(currentScanId);
       renderScan(body, generation);
       startPolling(currentScanId, generation);
