@@ -22,7 +22,9 @@
 
   let currentScanId = null;
   let pollTimer = null;
-  let pollInFlight = false;
+  let trackingGeneration = 0;
+  let activePollController = null;
+  let pollInFlightGeneration = null;
   let startInFlight = false;
 
   form.addEventListener("submit", async (event) => {
@@ -60,10 +62,10 @@
         return;
       }
 
-      currentScanId = body.id;
+      const generation = beginTracking(body.id);
       updateScanIdInUrl(currentScanId);
-      renderScan(body);
-      startPolling(currentScanId);
+      renderScan(body, generation);
+      startPolling(currentScanId, generation);
     } catch {
       showMessage(
         formError,
@@ -78,48 +80,88 @@
 
   const scanIdFromUrl = new URLSearchParams(window.location.search).get("scanId");
   if (scanIdFromUrl) {
-    currentScanId = scanIdFromUrl;
+    const generation = beginTracking(scanIdFromUrl);
     show(scanPanel);
     scanHeading.textContent = "Resuming scan";
     currentStep.textContent = "Loading scan status from the server.";
-    startPolling(scanIdFromUrl);
-    pollOnce(scanIdFromUrl);
+    startPolling(scanIdFromUrl, generation);
+    pollOnce(scanIdFromUrl, generation);
   }
 
-  function startPolling(scanId) {
-    stopPolling();
+  function beginTracking(scanId) {
+    stopCurrentTracking();
+    trackingGeneration += 1;
+    currentScanId = scanId;
+    return trackingGeneration;
+  }
+
+  function startPolling(scanId, generation) {
+    if (!isCurrentTracking(generation)) {
+      return;
+    }
+
+    stopPolling(generation);
     pollTimer = window.setInterval(() => {
-      pollOnce(scanId);
+      pollOnce(scanId, generation);
     }, POLL_INTERVAL_MS);
   }
 
-  function stopPolling() {
+  function stopPolling(generation) {
+    if (!isCurrentTracking(generation)) {
+      return;
+    }
+
     if (pollTimer) {
       window.clearInterval(pollTimer);
       pollTimer = null;
     }
   }
 
-  async function pollOnce(scanId) {
-    if (pollInFlight) {
+  function stopCurrentTracking() {
+    if (pollTimer) {
+      window.clearInterval(pollTimer);
+      pollTimer = null;
+    }
+
+    if (activePollController) {
+      activePollController.abort();
+      activePollController = null;
+    }
+
+    pollInFlightGeneration = null;
+  }
+
+  async function pollOnce(scanId, generation) {
+    if (
+      !isCurrentTracking(generation) ||
+      pollInFlightGeneration === generation
+    ) {
       return;
     }
 
-    pollInFlight = true;
+    const controller = new AbortController();
+    activePollController = controller;
+    pollInFlightGeneration = generation;
 
     try {
-      const response = await fetch(`/api/scans/${encodeURIComponent(scanId)}`);
+      const response = await fetch(`/api/scans/${encodeURIComponent(scanId)}`, {
+        signal: controller.signal
+      });
       const body = await response.json().catch(() => ({}));
 
+      if (!isCurrentTracking(generation)) {
+        return;
+      }
+
       if (response.status === 404) {
-        stopPolling();
+        stopPolling(generation);
         show(scanPanel);
         hide(resultsPanel);
         showMessage(
           scanError,
           "Scan not found. Start a new scan or check the scan ID in the URL."
         );
-        clearScanIdInUrl();
+        clearScanIdInUrl(generation);
         return;
       }
 
@@ -132,22 +174,36 @@
       }
 
       hide(networkMessage);
-      renderScan(body);
+      renderScan(body, generation);
 
       if (body.state === "completed" || body.state === "failed") {
-        stopPolling();
+        stopPolling(generation);
       }
-    } catch {
+    } catch (error) {
+      if (isAbortError(error) || !isCurrentTracking(generation)) {
+        return;
+      }
+
       showMessage(
         networkMessage,
         "Temporary network issue refreshing scan status. The scan has not been marked as failed."
       );
     } finally {
-      pollInFlight = false;
+      if (pollInFlightGeneration === generation) {
+        pollInFlightGeneration = null;
+      }
+
+      if (activePollController === controller) {
+        activePollController = null;
+      }
     }
   }
 
-  function renderScan(scan) {
+  function renderScan(scan, generation) {
+    if (!isCurrentTracking(generation)) {
+      return;
+    }
+
     show(scanPanel);
     scanHeading.textContent = `Scan for ${scan.repoUrl}`;
     scanState.textContent = formatState(scan.state);
@@ -168,11 +224,15 @@
     }
 
     if (scan.state === "completed" && scan.result) {
-      renderResults(scan.result);
+      renderResults(scan.result, generation);
     }
   }
 
-  function renderResults(result) {
+  function renderResults(result, generation) {
+    if (!isCurrentTracking(generation)) {
+      return;
+    }
+
     show(resultsPanel);
     riskLevel.textContent = result.riskLevel;
     riskLevel.className = `risk-badge risk-${result.riskLevel}`;
@@ -239,11 +299,23 @@
     window.history.replaceState({}, "", url);
   }
 
-  function clearScanIdInUrl() {
+  function clearScanIdInUrl(generation) {
+    if (!isCurrentTracking(generation)) {
+      return;
+    }
+
     currentScanId = null;
     const url = new URL(window.location.href);
     url.searchParams.delete("scanId");
     window.history.replaceState({}, "", url.pathname + url.search);
+  }
+
+  function isCurrentTracking(generation) {
+    return generation === trackingGeneration;
+  }
+
+  function isAbortError(error) {
+    return error instanceof Error && error.name === "AbortError";
   }
 
   function formatState(state) {
