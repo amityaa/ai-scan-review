@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import vm from "node:vm";
+// @ts-expect-error The frontend module is plain browser JavaScript.
+import { initScanApp } from "../src/public/scanController.js";
 
 type JsonBody = Record<string, unknown>;
 
@@ -513,13 +513,10 @@ function createUiHarness(initialHref = "http://localhost/") {
       calls.push(call);
     });
 
-  vm.runInNewContext(readFileSync("src/public/app.js", "utf8"), {
+  initScanApp({
     AbortController,
     document,
-    Error,
     fetch,
-    URL,
-    URLSearchParams,
     window
   });
 
