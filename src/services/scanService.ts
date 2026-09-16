@@ -174,7 +174,7 @@ export class ScanService {
       scan.progress = 100;
       scan.currentStep = "Simulated progress: scan failed during repository preparation.";
       scan.error =
-        "Simulated failure scenario selected because the repository URL contains \"fail\".";
+        "Simulated failure scenario selected because the repository name is \"fail-demo\".";
       scan.updatedAt = now;
       scan.completedAt = now;
       return;
@@ -191,17 +191,27 @@ export class ScanService {
 }
 
 export function selectScenario(repoUrl: string): ScanScenario {
-  const normalized = repoUrl.toLowerCase();
+  const repoName = getRepositoryName(repoUrl);
 
-  if (normalized.includes("fail")) {
+  if (repoName === "fail-demo") {
     return "failure";
   }
 
-  if (normalized.includes("clean")) {
+  if (repoName === "clean-demo") {
     return "clean";
   }
 
   return "findings";
+}
+
+function getRepositoryName(repoUrl: string): string {
+  try {
+    const parsed = new URL(repoUrl);
+    const pathParts = parsed.pathname.split("/").filter(Boolean);
+    return pathParts[1]?.toLowerCase() ?? "";
+  } catch {
+    return "";
+  }
 }
 
 function buildFindingsResult(): ScanResult {

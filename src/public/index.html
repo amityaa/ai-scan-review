@@ -34,10 +34,30 @@
             >
             <button id="start-button" type="submit">Start scan</button>
           </div>
-          <p class="hint">
-            Try <code>clean</code> for no findings or <code>fail</code> for a
-            failed scan scenario.
-          </p>
+          <div class="examples" aria-label="Demo repository examples">
+            <span>Examples:</span>
+            <button
+              class="example-button"
+              type="button"
+              data-example-url="https://github.com/acme/api-service"
+            >
+              Findings
+            </button>
+            <button
+              class="example-button"
+              type="button"
+              data-example-url="https://github.com/acme/clean-demo"
+            >
+              No findings
+            </button>
+            <button
+              class="example-button"
+              type="button"
+              data-example-url="https://github.com/acme/fail-demo"
+            >
+              Failure
+            </button>
+          </div>
           <p id="form-error" class="message error" role="alert" hidden></p>
         </form>
       </section>

@@ -3,7 +3,7 @@ import { after, before, describe, it } from "node:test";
 import type { Server } from "node:http";
 import { createApp } from "../src/app.js";
 import type { Scan, ScanResult } from "../src/models/scan.js";
-import { ScanService } from "../src/services/scanService.js";
+import { ScanService, selectScenario } from "../src/services/scanService.js";
 
 const service = new ScanService({ stepDelayMs: 5 });
 const app = createApp({ scanService: service });
@@ -35,6 +35,29 @@ describe("scan API", () => {
 
     assert.equal(response.status, 400);
     assert.deepEqual(body, { error: "repoUrl must use github.com." });
+  });
+
+  it("requires HTTPS GitHub repository root URLs without credentials or ports", async () => {
+    await assertValidationError(
+      "ftp://github.com/acme/repo",
+      "repoUrl must use HTTPS."
+    );
+    await assertValidationError(
+      "https://user:password@github.com/acme/repo",
+      "repoUrl must not include credentials."
+    );
+    await assertValidationError(
+      "https://github.com:8443/acme/repo",
+      "repoUrl must not include a port."
+    );
+    await assertValidationError(
+      "https://github.com/acme/repo/issues/1",
+      "Enter the repository root URL, for example https://github.com/owner/repo."
+    );
+    await assertValidationError(
+      "https://github.com/acme/repo?tab=readme",
+      "Enter the repository root URL, for example https://github.com/owner/repo."
+    );
   });
 
   it("returns 202 when starting a valid scan", async () => {
@@ -84,12 +107,20 @@ describe("scan API", () => {
 
     assert.equal(failed.state, "failed");
     assert.equal(failed.progress, 100);
-    assert.match(failed.error ?? "", /contains "fail"/);
+    assert.match(failed.error ?? "", /repository name is "fail-demo"/);
+  });
+
+  it("selects mock scenarios only from exact repository names", () => {
+    assert.equal(selectScenario("https://github.com/acme/fail-demo"), "failure");
+    assert.equal(selectScenario("https://github.com/acme/clean-demo"), "clean");
+    assert.equal(selectScenario("https://github.com/acme/failover-service"), "findings");
+    assert.equal(selectScenario("https://github.com/clean/api-service"), "findings");
+    assert.equal(selectScenario("https://github.com/acme/repo?clean"), "findings");
   });
 
   it("keeps multiple scans independent", async () => {
     const findingsScan = await createScan("https://github.com/acme/service-one");
-    const cleanScan = await createScan("https://github.com/acme/clean-service");
+    const cleanScan = await createScan("https://github.com/acme/clean-demo");
 
     const [findings, clean] = await Promise.all([
       waitForTerminalScan(findingsScan.id),
@@ -139,6 +170,17 @@ async function createScan(repoUrl: string): Promise<Scan> {
   const response = await postScan(repoUrl);
   assert.equal(response.status, 202);
   return (await response.json()) as Scan;
+}
+
+async function assertValidationError(
+  repoUrl: string,
+  expectedError: string
+): Promise<void> {
+  const response = await postScan(repoUrl);
+  const body = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(body, { error: expectedError });
 }
 
 async function waitForTerminalScan(id: string): Promise<Scan> {

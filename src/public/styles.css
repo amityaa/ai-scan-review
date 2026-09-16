@@ -67,6 +67,15 @@ h3 {
   color: #4b5563;
 }
 
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: #4b5563;
+}
+
 .panel {
   margin-top: 16px;
   padding: 20px;
@@ -106,6 +115,13 @@ button {
 button:disabled {
   cursor: wait;
   opacity: 0.65;
+}
+
+.example-button {
+  padding: 6px 9px;
+  border-color: #b8c2cc;
+  color: #1f2933;
+  background: #ffffff;
 }
 
 .section-header,

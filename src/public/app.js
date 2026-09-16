@@ -4,6 +4,7 @@
   const form = document.querySelector("#scan-form");
   const repoInput = document.querySelector("#repo-url");
   const startButton = document.querySelector("#start-button");
+  const exampleButtons = document.querySelectorAll("[data-example-url]");
   const formError = document.querySelector("#form-error");
   const scanPanel = document.querySelector("#scan-panel");
   const scanHeading = document.querySelector("#scan-heading");
@@ -26,6 +27,14 @@
   let activePollController = null;
   let pollInFlightGeneration = null;
   let startInFlight = false;
+
+  for (const button of exampleButtons) {
+    button.addEventListener("click", () => {
+      repoInput.value = button.dataset.exampleUrl;
+      hide(formError);
+      repoInput.focus();
+    });
+  }
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();

@@ -81,8 +81,20 @@ export function validateRepoUrl(value: unknown): RepoUrlValidation {
     return { valid: false, error: "repoUrl must be a valid URL." };
   }
 
+  if (parsed.protocol !== "https:") {
+    return { valid: false, error: "repoUrl must use HTTPS." };
+  }
+
+  if (parsed.username || parsed.password) {
+    return { valid: false, error: "repoUrl must not include credentials." };
+  }
+
   if (parsed.hostname.toLowerCase() !== "github.com") {
     return { valid: false, error: "repoUrl must use github.com." };
+  }
+
+  if (parsed.port) {
+    return { valid: false, error: "repoUrl must not include a port." };
   }
 
   const pathParts = parsed.pathname.split("/").filter(Boolean);
@@ -90,6 +102,13 @@ export function validateRepoUrl(value: unknown): RepoUrlValidation {
     return {
       valid: false,
       error: "repoUrl must include a GitHub owner and repository name."
+    };
+  }
+
+  if (pathParts.length !== 2 || parsed.search || parsed.hash) {
+    return {
+      valid: false,
+      error: "Enter the repository root URL, for example https://github.com/owner/repo."
     };
   }
 
